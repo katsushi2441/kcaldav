@@ -1,0 +1,6 @@
+.env
+public/kcaldav_config.php
+public/kcaldav_data/*.sqlite*
+public/.htaccess.exbridge
+demo/kcaldav_config.php
+outputs/

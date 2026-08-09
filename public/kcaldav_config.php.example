@@ -1,0 +1,36 @@
+<?php
+/**
+ * kcaldav の設定。このファイルを kcaldav_config.php にコピーして編集してください。
+ * （.example のままでは動きません）
+ *
+ * ここに書いたユーザーとカレンダーだけが使えます。書いていない相手は
+ * 一切さわれません。パスワードは password_hash で作った文字列を入れます。
+ * 作り方: php scripts/make_password_hash.php
+ */
+
+// タイムゾーン（予定の既定。iCalは各予定がTZを持つので主に表示用）
+define('KCALDAV_TZ', 'Asia/Tokyo');
+
+// Basic認証のrealm（変えなくてよい）
+define('KCALDAV_REALM', 'kcaldav');
+
+/**
+ * ユーザーとカレンダー。
+ *   キー           … ログインのユーザー名（URLにも入る。英数字推奨）
+ *   password_hash  … password_hash() で作った文字列
+ *   calendars      … このユーザーが持つカレンダー
+ *       キー   … カレンダーの識別子（URLに入る。運用開始後は変えない）
+ *       name   … 画面表示名
+ *       color  … 表示色（対応クライアントのみ）
+ */
+function kcaldav_users() {
+    return array(
+        'kojima' => array(
+            'password_hash' => '',  // ← php scripts/make_password_hash.php で作って貼る
+            'calendars' => array(
+                'default' => array('name' => 'マイカレンダー', 'color' => '#2f6bd8'),
+                // 'work' => array('name' => '仕事',   'color' => '#e2725b'),
+            ),
+        ),
+    );
+}

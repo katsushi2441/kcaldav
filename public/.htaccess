@@ -1,0 +1,15 @@
+# CGI/FastCGI に Authorization ヘッダを渡す（Basic認証で必須）
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization},L]
+</IfModule>
+# 保存データを直接読ませない
+<FilesMatch "\.sqlite($|-)">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
