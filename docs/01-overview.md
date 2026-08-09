@@ -65,11 +65,30 @@ CGI/FastCGI環境では `PHP_AUTH_USER` が空のことがある。そのため
 4. カレンダーアプリに `https://ドメイン/kcaldav.php/<ユーザー>/<カレンダー>/` を登録
 5. 検証: `php scripts/check_kcaldav.php`(18件OK)
 
-## クライアント別メモ
+## WEBカレンダー(ブラウザで読み書き・アプリ不要)
+
+ブラウザで本体URL(例 `https://ドメイン/kcaldav.php/` やリライトした `/cal/`)を
+開くと、Basic認証のあと**予定の一覧・追加・編集・削除ができるWEB画面**になる
+(`kc_web_app()`)。スマホのブラウザだけで完結する。ここで足した予定は同じ
+eventsテーブルに入るので、下の各クライアントにも反映される。
+
+- 一覧は「これからの予定」を先に、過去は折りたたみ
+- 追加/編集フォーム: タイトル・日付・時刻・終日・場所。入力はJST、保存はUTC(Z)
+- CSRFトークン＋PRG(リダイレクト)で二重送信を防止
+
+## クライアント別メモ(CalDAV同期)
 
 - **Thunderbird**: 新しいカレンダー → ネットワーク上 → CalDAV → ユーザー名 + カレンダーURL
-- **iPhone**: 設定 → カレンダー → アカウント追加 → その他 → CalDAV。
-  サーバは `ドメイン/kcaldav.php/<ユーザー>/` でも、カレンダーURL直接でもよい
-- **Android**: DAVx5(F-Droid/Play) にベースURL `https://ドメイン/kcaldav.php/<ユーザー>/`
+- **iPhone / iPad**: 設定 → カレンダー → アカウント追加 → その他 → CalDAV(アプリ不要)。
+  サーバは `ドメイン/<ユーザー>/` でも、カレンダーURL直接でもよい
+- **Android(KashCal)**: 単体でCalDAV対応。アカウント追加 → CalDAV → ベースURL・ユーザー名・パスワード
+- **Android(DAVx5)**: F-Droid版は無料。ベースURL `https://ドメイン/<ユーザー>/` を登録し、
+  普段のカレンダーアプリで読み書き
+
+### 書き込みが「読み取り専用」になるとき
+クライアントが編集を無効化する場合、多くは `current-user-privilege-set` を
+見て判断している。kcaldav はカレンダー/予定の両方で read/write/bind 権限を返す。
+OPTIONS の DAV ヘッダにも `access-control` を含める。これが無いと KashCal 等は
+読み取り専用扱いにする。
 
 PHP 5.6以上(8.3確認済み)。DB・Composer・npm 不要。

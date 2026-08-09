@@ -1,0 +1,16 @@
+AddHandler php-script .php
+DirectoryIndex kcaldav.php
+
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# /cal/<ユーザー>/<カレンダー>/... を kcaldav.php に流す(URLから.phpを消す)
+RewriteCond %{REQUEST_URI} !kcaldav\.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^(.*)$ kcaldav.php/$1 [L,QSA]
+
+<FilesMatch "\.sqlite($|-)">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+</FilesMatch>
