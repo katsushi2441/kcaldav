@@ -78,6 +78,15 @@ list($c) = http('POST', "$B/", array('post' =>
 list($c, $h, $b) = http('GET', "$B/?cal=default&view=list");
 ok(strpos($b, '終日イベント') !== false && strpos($b, '終日') !== false, '終日予定が追加・表示される');
 
+echo "\n[8] タブ・フォームの起点が有効(PATH_INFO空=web app)\n";
+list($c,$h,$b)=http('GET',"$B/?view=month");
+preg_match('/href="([^"]*view=week)"/',$b,$mw); $wk=isset($mw[1])?str_replace('&amp;','&',$mw[1]):'';
+$abs = (strpos($wk,'http')===0)?$wk:("http://127.0.0.1:18996".$wk);
+list($cc)=http('GET',$abs);
+ok($cc===200,'週タブのリンク先が200(404にならない)');
+preg_match('/action="([^"]*)"/',$b,$ma); $act=isset($ma[1])?$ma[1]:'';
+ok($act!=='' && substr($act,-9)==='kcaldav.php' || substr($act,-1)==='/', 'フォームactionがweb app入口を指す');
+
 if (is_resource($proc)) { proc_terminate($proc); proc_close($proc); }
 array_map('unlink', glob($tmp . '/*')); @rmdir($tmp);
 echo "\n" . ($fail === 0 ? "すべて通りました（{$pass}件）\n" : "失敗 {$fail}件 / 成功 {$pass}件\n");

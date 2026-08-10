@@ -484,6 +484,17 @@ function kc_jst($ts, $fmt) {
     return $dt->format($fmt);
 }
 
+/* WEBカレンダーの入口URL(PATH_INFOが空になる=web appが動くURL)。
+ * きれいURL(/cal)なら "/cal/"、素の設置なら "…/kcaldav.php"。
+ * タブ・ナビ・フォームのactionは必ずこれを起点にする(ユーザー付きパスは
+ * PATH_INFOが空でなくなりCalDAV側に回って404/405になる)。 */
+function kc_web_entry() {
+    if (defined('KCALDAV_PUBLIC_BASE') && KCALDAV_PUBLIC_BASE !== '') {
+        return rtrim(KCALDAV_PUBLIC_BASE, '/') . '/';
+    }
+    return $_SERVER['SCRIPT_NAME'];
+}
+
 /* PWA資産(manifest/sw/icon)のベースURL。きれいURL(/cal)ならそれ、
  * 素の設置なら kcaldav.php のあるディレクトリ。 */
 function kc_asset_base() {
@@ -547,8 +558,7 @@ function kc_web_app() {
     $cals = $users[$user]['calendars'];
     $ckeys = array_keys($cals);
     $cal = isset($_REQUEST['cal']) && isset($cals[$_REQUEST['cal']]) ? $_REQUEST['cal'] : $ckeys[0];
-    $base = kc_href('/' . rawurlencode($user) . '/' . rawurlencode($cal) . '/');
-    $self = kc_href('/' . rawurlencode($user) . '/');    // フォームのaction(戻り先)
+    $self = kc_web_entry();    // タブ・ナビ・フォームの起点(PATH_INFOが空=web app)
     $msg = '';
 
     // ---- 追加・更新・削除 ----
