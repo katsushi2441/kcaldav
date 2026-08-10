@@ -19,7 +19,7 @@ function http($m, $url, $opt = array()) {
     global $jar;
     $ch = curl_init($url);
     curl_setopt_array($ch, array(CURLOPT_CUSTOMREQUEST => $m, CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HEADER => true, CURLOPT_USERPWD => 'kojima:1111',
+        CURLOPT_HEADER => true,
         CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar,
         CURLOPT_HTTPHEADER => array('Accept: text/html'), CURLOPT_FOLLOWLOCATION => false));
     if (isset($opt['post'])) { curl_setopt($ch, CURLOPT_POSTFIELDS, $opt['post']); }
@@ -30,7 +30,15 @@ function http($m, $url, $opt = array()) {
 
 echo "\n[1] 認証\n";
 $ch = curl_init("$B/"); curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER=>true, CURLOPT_HTTPHEADER=>array('Accept: text/html')));
-curl_exec($ch); ok(curl_getinfo($ch, CURLINFO_HTTP_CODE) === 401, '未認証は401'); curl_close($ch);
+$body=curl_exec($ch); ok(strpos($body,'ログイン')!==false, '未ログインはログイン画面'); curl_close($ch);
+
+echo "\n[1b] フォームログイン\n";
+list($lc)=http('POST',"$B/",array('post'=>'action=login&login_user=kojima&login_pass=1111'));
+ok($lc===302,'正しい資格でログイン(302)');
+list($bc)=http('POST',"$B/",array('post'=>'action=login&login_user=kojima&login_pass=wrong'));
+ok($bc===200,'誤資格はログイン画面(200)');
+// 再ログイン(誤りでセッション未確立のため)
+http('POST',"$B/",array('post'=>'action=login&login_user=kojima&login_pass=1111'));
 
 echo "\n[2] WEB画面が出る\n";
 list($c, $h, $b) = http('GET', "$B/");

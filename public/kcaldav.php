@@ -551,14 +551,73 @@ function kc_web_start_session() {
     if (empty($_SESSION['kc_csrf'])) { $_SESSION['kc_csrf'] = bin2hex(random_bytes(16)); }
 }
 
-function kc_web_app() {
-    $user = kc_require_auth();          // ブラウザにBasic認証を要求
+/* WEB画面のフォームログイン画面(Basic認証はWebView/アプリで扱えないため)。 */
+function kc_web_login_page($self, $err) {
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
+       . '<meta name="viewport" content="width=device-width,initial-scale=1"><title>ログイン</title>'
+       . '<link rel="manifest" href="' . kc_e(kc_asset_base()) . '/manifest.webmanifest">'
+       . '<meta name="theme-color" content="#2f6bd8">'
+       . '<link rel="apple-touch-icon" href="' . kc_e(kc_asset_base()) . '/icon-192.png">'
+       . '<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#eef2f5;'
+       . 'font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;color:#22303c}'
+       . '.box{background:#fff;border:1px solid #dbe3ea;border-radius:16px;padding:26px 22px;width:min(340px,88vw);'
+       . 'box-shadow:0 10px 30px rgba(20,40,60,.08);text-align:center}'
+       . '.box .ic{font-size:40px}h1{font-size:18px;margin:6px 0 16px}'
+       . 'label{display:block;text-align:left;font-size:12px;color:#5a6b7a;font-weight:700;margin:10px 0 3px}'
+       . 'input{width:100%;border:1px solid #cfd9e2;border-radius:10px;padding:12px;font:inherit;background:#fbfdfe}'
+       . '.btn{margin-top:16px;width:100%;border:0;border-radius:11px;background:#2f6bd8;color:#fff;font:800 15px inherit;padding:13px;cursor:pointer}'
+       . '.err{background:#fdf1f1;border:1px solid #edc4c4;color:#a33;border-radius:10px;padding:8px 12px;font-size:13px;margin:0 0 10px}'
+       . '</style></head><body><form class="box" method="post" action="' . kc_e($self) . '">'
+       . '<div class="ic">🗓</div><h1>カレンダーにログイン</h1>'
+       . ($err !== '' ? '<div class="err">' . kc_e($err) . '</div>' : '')
+       . '<input type="hidden" name="action" value="login">'
+       . '<label>ユーザー名</label><input name="login_user" autocapitalize="none" autocorrect="off" required autofocus>'
+       . '<label>パスワード</label><input name="login_pass" type="password" required>'
+       . '<button class="btn">ログイン</button></form></body></html>';
+}
+
+/* セッションからログイン中ユーザーを得る。未ログインならログイン画面を出して終了。 */
+function kc_web_auth($self) {
     kc_web_start_session();
+    $users = kcaldav_users();
+    // ログアウト
+    if (isset($_GET['logout'])) {
+        unset($_SESSION['kc_user']);
+        header('Location: ' . $self); exit;
+    }
+    // ログイン送信
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'login') {
+        $u = trim((string)(isset($_POST['login_user']) ? $_POST['login_user'] : ''));
+        $p = (string)(isset($_POST['login_pass']) ? $_POST['login_pass'] : '');
+        if (isset($users[$u])) {
+            $hash = $users[$u]['password_hash'];
+            $ok = (strpos($hash, '$') === 0) ? password_verify($p, $hash) : hash_equals($hash, $p);
+            if ($ok) {
+                session_regenerate_id(true);
+                $_SESSION['kc_user'] = $u;
+                header('Location: ' . $self); exit;
+            }
+        }
+        sleep(1);
+        kc_web_login_page($self, 'ユーザー名かパスワードが違います。');
+        exit;
+    }
+    // セッション確認
+    if (!empty($_SESSION['kc_user']) && isset($users[$_SESSION['kc_user']])) {
+        return $_SESSION['kc_user'];
+    }
+    kc_web_login_page($self, '');
+    exit;
+}
+
+function kc_web_app() {
+    $self = kc_web_entry();    // タブ・ナビ・フォームの起点(PATH_INFOが空=web app)
+    $user = kc_web_auth($self); // フォーム(セッション)ログイン。Basic認証は使わない
     $users = kcaldav_users();
     $cals = $users[$user]['calendars'];
     $ckeys = array_keys($cals);
     $cal = isset($_REQUEST['cal']) && isset($cals[$_REQUEST['cal']]) ? $_REQUEST['cal'] : $ckeys[0];
-    $self = kc_web_entry();    // タブ・ナビ・フォームの起点(PATH_INFOが空=web app)
     $msg = '';
 
     // ---- 追加・更新・削除 ----
@@ -872,7 +931,11 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $events, $view
        . '.wday{margin:8px 0}.wdh{display:block;font-weight:800;font-size:14px;text-decoration:none;color:#22303c;padding:4px 8px;background:#e8edf2;border-radius:8px}'
        . '.wdh.sun{color:#c0392b}.wdh.sat{color:#2f6bd8}.wdh.today{background:var(--a);color:#fff}'
        . '</style></head><body>'
-       . '<header>🗓 ' . $calname . '</header><main>'
+       . '<header style="display:flex;align-items:center;justify-content:space-between">'
+       . '<span>🗓 ' . $calname . '</span>'
+       . '<a href="' . kc_e($self) . '?logout=1" style="color:#fff;text-decoration:none;font-size:12px;'
+       . 'border:1px solid rgba(255,255,255,.5);border-radius:999px;padding:3px 12px;font-weight:700">ログアウト</a>'
+       . '</header><main>'
        . ($tabs !== '' ? '<div class="tabs">' . $tabs . '</div>' : '')
        . ($msg !== '' ? '<div class="msg">' . kc_e($msg) . '</div>' : '')
        // 表示切替 + 追加ボタン
