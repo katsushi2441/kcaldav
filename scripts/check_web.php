@@ -85,7 +85,7 @@ $abs = (strpos($wk,'http')===0)?$wk:("http://127.0.0.1:18996".$wk);
 list($cc)=http('GET',$abs);
 ok($cc===200,'週タブのリンク先が200(404にならない)');
 preg_match('/action="([^"]*)"/',$b,$ma); $act=isset($ma[1])?$ma[1]:'';
-ok($act!=='' && substr($act,-9)==='kcaldav.php' || substr($act,-1)==='/', 'フォームactionがweb app入口を指す');
+ok($act!=='' && (strpos($act,'kcaldav.php')!==false || substr($act,-1)==='/'), 'フォームactionがweb app入口を指す');
 
 if (is_resource($proc)) { proc_terminate($proc); proc_close($proc); }
 array_map('unlink', glob($tmp . '/*')); @rmdir($tmp);
