@@ -4,3 +4,7 @@ public/kcaldav_data/*.sqlite*
 public/.htaccess.exbridge
 demo/kcaldav_config.php
 outputs/
+android/upload-keystore.jks
+android/
+android/*
+!android/twa-manifest.json
