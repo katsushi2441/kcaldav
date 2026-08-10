@@ -44,7 +44,7 @@ echo "\n[3] 予定を追加(POST)→一覧に出る\n";
 list($c, $h) = http('POST', "$B/", array('post' =>
     "csrf=$csrf&cal=default&action=save&summary=" . rawurlencode('テスト会議') . "&date=2026-08-15&edate=2026-08-15&stime=14:00&etime=15:00&location=" . rawurlencode('会議室A')));
 ok($c === 302, '追加後はリダイレクト(PRG)');
-list($c, $h, $b) = http('GET', "$B/?cal=default");
+list($c, $h, $b) = http('GET', "$B/?cal=default&view=list");
 ok(strpos($b, 'テスト会議') !== false, '一覧にタイトルが出る');
 ok(strpos($b, '14:00') !== false, '時刻が出る(JST)');
 ok(strpos($b, '会議室A') !== false, '場所が出る');
@@ -64,18 +64,18 @@ list($c, $h, $b2) = http('GET', "$B/?cal=default&edit=$id");
 ok(strpos($b2, 'value="テスト会議"') !== false, '編集フォームに既存値が入る');
 list($c) = http('POST', "$B/", array('post' =>
     "csrf=$csrf&cal=default&action=save&id=$id&summary=" . rawurlencode('会議(変更)') . "&date=2026-08-15&edate=2026-08-15&stime=16:00&etime=17:00"));
-list($c, $h, $b) = http('GET', "$B/?cal=default");
+list($c, $h, $b) = http('GET', "$B/?cal=default&view=list");
 ok(strpos($b, '会議(変更)') !== false && strpos($b, '16:00') !== false, '編集が反映される');
 
 echo "\n[6] 削除\n";
 list($c) = http('POST', "$B/", array('post' => "csrf=$csrf&cal=default&action=del&id=$id"));
-list($c, $h, $b) = http('GET', "$B/?cal=default");
+list($c, $h, $b) = http('GET', "$B/?cal=default&view=list");
 ok(strpos($b, '会議(変更)') === false, '削除で一覧から消える');
 
 echo "\n[7] 終日予定\n";
 list($c) = http('POST', "$B/", array('post' =>
     "csrf=$csrf&cal=default&action=save&summary=" . rawurlencode('終日イベント') . "&date=2026-08-20&edate=2026-08-20&allday=1"));
-list($c, $h, $b) = http('GET', "$B/?cal=default");
+list($c, $h, $b) = http('GET', "$B/?cal=default&view=list");
 ok(strpos($b, '終日イベント') !== false && strpos($b, '終日') !== false, '終日予定が追加・表示される');
 
 if (is_resource($proc)) { proc_terminate($proc); proc_close($proc); }

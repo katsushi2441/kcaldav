@@ -618,8 +618,15 @@ function kc_web_app() {
         if ($r) { $editing = kc_ics_parse($r['ical']); $editing['id'] = $r['id']; }
     }
 
-    // ---- 予定一覧(今日以降を先に) ----
-    $st = kc_db()->prepare('SELECT id, ical FROM events WHERE userid=? AND calendar=? ORDER BY id DESC');
+    // 表示モードと基準日
+    $view = (isset($_GET['view']) && in_array($_GET['view'], array('month', 'week', 'list', 'day'), true))
+        ? $_GET['view'] : 'month';
+    $day = (isset($_GET['d']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['d'])) ? $_GET['d'] : '';
+    $ym  = (isset($_GET['ym']) && preg_match('/^\d{4}-\d{2}$/', $_GET['ym'])) ? $_GET['ym']
+         : ($day !== '' ? substr($day, 0, 7) : date('Y-m'));
+
+    // ---- 全予定を取得(パース) ----
+    $st = kc_db()->prepare('SELECT id, ical FROM events WHERE userid=? AND calendar=?');
     $st->execute(array($user, $cal));
     $events = array();
     while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
@@ -628,56 +635,167 @@ function kc_web_app() {
         $events[] = $p;
     }
     usort($events, function ($a, $b) { return $a['start'] - $b['start']; });
-    $todaymid = strtotime('today 00:00');
-    $upcoming = array(); $past = array();
-    foreach ($events as $e) { if (($e['end'] !== null ? $e['end'] : $e['start']) >= $todaymid) { $upcoming[] = $e; } else { $past[] = $e; } }
 
-    kc_web_render($user, $cal, $cals, $self, $msg, $editing, $upcoming, array_reverse($past));
+    kc_web_render($user, $cal, $cals, $self, $msg, $editing, $events, $view, $ym, $day);
     exit;
 }
 
-function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $upcoming, $past) {
+function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $events, $view, $ym, $day) {
     $csrf = kc_e($_SESSION['kc_csrf']);
     $wd = array('日','月','火','水','木','金','土');
-    $ev_html = function ($e) use ($self, $cal, $csrf, $wd) {
-        $d = kc_jst($e['start'], 'n/j') . '(' . $wd[(int)kc_jst($e['start'], 'w')] . ')';
-        if ($e['allday']) { $time = '終日'; }
-        else {
-            $time = kc_jst($e['start'], 'H:i');
-            if ($e['end']) { $time .= '–' . kc_jst($e['end'], 'H:i'); }
+    $q = '?cal=' . rawurlencode($cal);         // 共通クエリ(カレンダー保持)
+    $color = isset($cals[$cal]['color']) ? $cals[$cal]['color'] : '#2f6bd8';
+
+    // 予定を日付(JST 'Y-m-d')でバケツ分け(月/週/日表示用)
+    $byday = array();
+    foreach ($events as $e) {
+        $byday[kc_jst($e['start'], 'Y-m-d')][] = $e;
+    }
+    $today = date('Y-m-d');
+
+    // 予定1行(リスト/週/日表示用)
+    $ev_row = function ($e, $showdate = true) use ($self, $q, $csrf, $cal, $wd, $color) {
+        if ($showdate) {
+            $head = kc_jst($e['start'], 'n/j') . '(' . $wd[(int)kc_jst($e['start'], 'w')] . ')';
+        } else {
+            $head = $e['allday'] ? '終日' : kc_jst($e['start'], 'H:i');
         }
+        if ($e['allday']) { $time = '終日'; }
+        else { $time = kc_jst($e['start'], 'H:i') . ($e['end'] ? '–' . kc_jst($e['end'], 'H:i') : ''); }
         $loc = $e['location'] !== '' ? '<span class="loc">📍' . kc_e($e['location']) . '</span>' : '';
-        return '<div class="ev"><div class="evd">' . kc_e($d) . '<small>' . kc_e($time) . '</small></div>'
+        return '<div class="ev"><div class="evd" style="color:' . kc_e($color) . '">' . kc_e($head)
+            . ($showdate ? '<small>' . kc_e($time) . '</small>' : '') . '</div>'
             . '<div class="evb"><b>' . kc_e($e['summary']) . '</b>' . $loc . '</div>'
             . '<div class="eva">'
-            . '<a class="mini" href="' . $self . '?cal=' . rawurlencode($cal) . '&amp;edit=' . $e['id'] . '#form">編集</a>'
+            . '<a class="mini" href="' . $self . $q . '&amp;edit=' . $e['id'] . '#form">編集</a>'
             . '<form method="post" onsubmit="return confirm(\'削除しますか？\')">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="cal" value="' . kc_e($cal) . '">'
             . '<input type="hidden" name="action" value="del"><input type="hidden" name="id" value="' . $e['id'] . '">'
             . '<button class="mini del">削除</button></form></div></div>';
     };
-    $up = ''; foreach ($upcoming as $e) { $up .= $ev_html($e); }
-    if ($up === '') { $up = '<p class="empty">これからの予定はありません。上のフォームから追加できます。</p>'; }
-    $pasthtml = ''; foreach ($past as $e) { $pasthtml .= $ev_html($e); }
 
-    // カレンダー切り替え
+    /* ---- 月表示 ---- */
+    $body = '';
+    if ($view === 'month') {
+        $t = strtotime($ym . '-01 12:00:00');
+        $y = (int)date('Y', $t); $mo = (int)date('n', $t);
+        $prev = date('Y-m', strtotime($ym . '-01 -1 month'));
+        $next = date('Y-m', strtotime($ym . '-01 +1 month'));
+        $first_dow = (int)date('w', $t);                       // 1日の曜日(0=日)
+        $gridstart = strtotime('-' . $first_dow . ' day', $t); // 日曜始まり
+        $nav = '<div class="nav"><a href="' . $self . $q . '&amp;view=month&amp;ym=' . $prev . '">‹</a>'
+             . '<b>' . $y . '年' . $mo . '月</b>'
+             . '<a href="' . $self . $q . '&amp;view=month&amp;ym=' . $next . '">›</a></div>';
+        $head = '<div class="mgrid mhead">';
+        foreach ($wd as $i => $w) { $head .= '<div class="mwd' . ($i === 0 ? ' sun' : ($i === 6 ? ' sat' : '')) . '">' . $w . '</div>'; }
+        $head .= '</div>';
+        $grid = '<div class="mgrid">';
+        for ($i = 0; $i < 42; $i++) {
+            $cellt = strtotime('+' . $i . ' day', $gridstart);
+            $date = date('Y-m-d', $cellt);
+            $dow = (int)date('w', $cellt);
+            $cls = 'mcell';
+            if ((int)date('n', $cellt) !== $mo) { $cls .= ' other'; }
+            if ($date === $today) { $cls .= ' today'; }
+            $numcls = $dow === 0 ? ' sun' : ($dow === 6 ? ' sat' : '');
+            $chips = '';
+            if (isset($byday[$date])) {
+                $n = 0;
+                foreach ($byday[$date] as $e) {
+                    if ($n < 3) {
+                        $chips .= '<span class="mchip" style="background:' . kc_e($color) . '">'
+                            . kc_e(mb_strimwidth($e['summary'], 0, 12, '…', 'UTF-8')) . '</span>';
+                    }
+                    $n++;
+                }
+                if ($n > 3) { $chips .= '<span class="mmore">+' . ($n - 3) . '</span>'; }
+            }
+            $grid .= '<a class="' . $cls . '" href="' . $self . $q . '&amp;view=day&amp;d=' . $date . '">'
+                . '<span class="mday' . $numcls . '">' . (int)date('j', $cellt) . '</span>' . $chips . '</a>';
+            if ($i % 7 === 6 && (int)date('n', strtotime('+1 day', $cellt)) !== $mo && $i >= 34) { break; }
+        }
+        $grid .= '</div>';
+        $body = $nav . $head . $grid;
+
+    /* ---- 週表示 ---- */
+    } elseif ($view === 'week') {
+        $anchor = ($day !== '') ? $day : $today;
+        $at = strtotime($anchor . ' 12:00:00');
+        $ws = strtotime('-' . (int)date('w', $at) . ' day', $at);  // 日曜始まり
+        $prev = date('Y-m-d', strtotime('-7 day', $ws));
+        $next = date('Y-m-d', strtotime('+7 day', $ws));
+        $label = date('n/j', $ws) . '〜' . date('n/j', strtotime('+6 day', $ws));
+        $nav = '<div class="nav"><a href="' . $self . $q . '&amp;view=week&amp;d=' . $prev . '">‹</a>'
+             . '<b>' . $label . '</b>'
+             . '<a href="' . $self . $q . '&amp;view=week&amp;d=' . $next . '">›</a></div>';
+        $days = '';
+        for ($i = 0; $i < 7; $i++) {
+            $dt = strtotime('+' . $i . ' day', $ws); $date = date('Y-m-d', $dt); $dow = (int)date('w', $dt);
+            $hcls = 'wdh' . ($dow === 0 ? ' sun' : ($dow === 6 ? ' sat' : '')) . ($date === $today ? ' today' : '');
+            $rows = '';
+            if (isset($byday[$date])) { foreach ($byday[$date] as $e) { $rows .= $ev_row($e, false); } }
+            else { $rows = '<p class="empty" style="padding:6px 0">—</p>'; }
+            $days .= '<div class="wday"><a class="' . $hcls . '" href="' . $self . $q . '&amp;view=day&amp;d=' . $date . '">'
+                . date('n/j', $dt) . '(' . $wd[$dow] . ')</a>' . $rows . '</div>';
+        }
+        $body = $nav . $days;
+
+    /* ---- 日表示 ---- */
+    } elseif ($view === 'day') {
+        $anchor = ($day !== '') ? $day : $today;
+        $at = strtotime($anchor . ' 12:00:00');
+        $prev = date('Y-m-d', strtotime('-1 day', $at));
+        $next = date('Y-m-d', strtotime('+1 day', $at));
+        $nav = '<div class="nav"><a href="' . $self . $q . '&amp;view=day&amp;d=' . $prev . '">‹</a>'
+             . '<b>' . date('n月j日', $at) . '(' . $wd[(int)date('w', $at)] . ')</b>'
+             . '<a href="' . $self . $q . '&amp;view=day&amp;d=' . $next . '">›</a></div>';
+        $rows = '';
+        if (isset($byday[$anchor])) { foreach ($byday[$anchor] as $e) { $rows .= $ev_row($e, false); } }
+        else { $rows = '<p class="empty">この日の予定はありません。</p>'; }
+        $body = $nav . $rows;
+
+    /* ---- 一覧(アジェンダ) ---- */
+    } else {
+        $todaymid = strtotime('today 00:00');
+        $up = ''; $pastn = 0; $pasthtml = '';
+        foreach ($events as $e) {
+            if (($e['end'] !== null ? $e['end'] : $e['start']) >= $todaymid) { $up .= $ev_row($e, true); }
+        }
+        foreach (array_reverse($events) as $e) {
+            if (($e['end'] !== null ? $e['end'] : $e['start']) < $todaymid) { $pasthtml .= $ev_row($e, true); $pastn++; }
+        }
+        if ($up === '') { $up = '<p class="empty">これからの予定はありません。</p>'; }
+        $body = '<h3 class="sec">これからの予定</h3>' . $up;
+        if ($pastn) { $body .= '<details><summary>過去の予定を見る（' . $pastn . '件）</summary>' . $pasthtml . '</details>'; }
+    }
+
+    // 表示切替(月/週/一覧)
+    $vsw = '';
+    foreach (array('month' => '月', 'week' => '週', 'list' => '一覧') as $v => $lbl) {
+        $on = ($view === $v || ($view === 'day' && $v === 'month')) ? ' on' : '';
+        $vsw .= '<a class="vtab' . $on . '" href="' . $self . $q . '&amp;view=' . $v . '">' . $lbl . '</a>';
+    }
+
+    // カレンダー切り替え(複数のとき)
     $tabs = '';
     if (count($cals) > 1) {
         foreach ($cals as $ck => $meta) {
             $on = ($ck === $cal) ? ' on' : '';
-            $tabs .= '<a class="tab' . $on . '" href="' . $self . '?cal=' . rawurlencode($ck) . '">' . kc_e($meta['name']) . '</a>';
+            $tabs .= '<a class="tab' . $on . '" href="' . $self . '?cal=' . rawurlencode($ck) . '&amp;view=' . $view . '">' . kc_e($meta['name']) . '</a>';
         }
     }
 
-    // 追加/編集フォームの初期値
+    // 追加/編集フォームの初期値(月/週/日でタップした日付を初期値に)
     $isedit = $editing !== null;
+    $newdate = ($day !== '') ? $day : date('Y-m-d');
     $f = array('id' => $isedit ? $editing['id'] : '', 'summary' => $isedit ? $editing['summary'] : '',
-        'date' => $isedit ? kc_jst($editing['start'], 'Y-m-d') : date('Y-m-d'),
-        'edate' => $isedit && $editing['end'] ? kc_jst($editing['allday'] ? $editing['end'] - 86400 : $editing['end'], 'Y-m-d') : ($isedit ? kc_jst($editing['start'], 'Y-m-d') : date('Y-m-d')),
+        'date' => $isedit ? kc_jst($editing['start'], 'Y-m-d') : $newdate,
+        'edate' => $isedit && $editing['end'] ? kc_jst($editing['allday'] ? $editing['end'] - 86400 : $editing['end'], 'Y-m-d') : ($isedit ? kc_jst($editing['start'], 'Y-m-d') : $newdate),
         'stime' => $isedit && !$editing['allday'] ? kc_jst($editing['start'], 'H:i') : '09:00',
         'etime' => $isedit && !$editing['allday'] && $editing['end'] ? kc_jst($editing['end'], 'H:i') : '10:00',
         'allday' => $isedit ? $editing['allday'] : false,
         'location' => $isedit ? $editing['location'] : '');
+    $formopen = ($isedit || isset($_GET['add'])) ? ' open' : '';
 
     header('Content-Type: text/html; charset=utf-8');
     $calname = kc_e($cals[$cal]['name']);
@@ -720,14 +838,40 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $upcoming, $pa
        . 'form.inl,.eva form{margin:0}.mini.del{color:#c0392b;width:100%}'
        . '.empty{color:#6b7a88;font-size:14px;text-align:center;padding:14px}'
        . 'h3.sec{font-size:13px;color:#6b7a88;margin:20px 0 4px}'
-       . 'details{margin-top:10px}summary{font-size:13px;color:#6b7a88;cursor:pointer}'
+       . 'details.pastwrap{margin-top:10px}details.pastwrap>summary{font-size:13px;color:#6b7a88;cursor:pointer}'
+       // 表示切替・期間ナビ
+       . '.bar{display:flex;align-items:center;gap:8px;margin:10px 0}'
+       . '.vsw{display:flex;gap:4px;background:#e2e8ee;border-radius:999px;padding:3px}'
+       . '.vtab{flex:1;text-align:center;font-size:13px;font-weight:700;text-decoration:none;color:#42566a;border-radius:999px;padding:6px 0;white-space:nowrap}'
+       . '.vtab.on{background:var(--a);color:#fff}'
+       . '.addbtn{margin-left:auto;text-decoration:none;background:var(--a);color:#fff;border-radius:999px;padding:7px 14px;font-weight:800;font-size:14px;white-space:nowrap}'
+       . '.nav{display:flex;align-items:center;justify-content:space-between;margin:6px 0 8px}'
+       . '.nav a{text-decoration:none;color:var(--a);font-size:22px;font-weight:900;padding:2px 14px;border:1px solid #cfd9e2;border-radius:10px;background:#fff}'
+       . '.nav b{font-size:16px}'
+       // 月グリッド
+       . '.mgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}'
+       . '.mhead{margin-bottom:3px}.mwd{text-align:center;font-size:11px;font-weight:700;color:#6b7a88;padding:2px 0}'
+       . '.mwd.sun{color:#c0392b}.mwd.sat{color:#2f6bd8}'
+       . '.mcell{min-height:64px;background:#fff;border:1px solid #e3e9ef;border-radius:8px;padding:3px;text-decoration:none;color:#22303c;display:block;overflow:hidden}'
+       . '.mcell.other{background:#f4f6f8;color:#b3bdc7}.mcell.today{border-color:var(--a);box-shadow:inset 0 0 0 1px var(--a)}'
+       . '.mday{font-size:12px;font-weight:700;display:block;text-align:right;padding-right:2px}'
+       . '.mday.sun{color:#c0392b}.mday.sat{color:#2f6bd8}'
+       . '.mchip{display:block;font-size:10px;color:#fff;border-radius:3px;padding:1px 3px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+       . '.mmore{display:block;font-size:10px;color:#6b7a88;margin-top:1px}'
+       // 週
+       . '.wday{margin:8px 0}.wdh{display:block;font-weight:800;font-size:14px;text-decoration:none;color:#22303c;padding:4px 8px;background:#e8edf2;border-radius:8px}'
+       . '.wdh.sun{color:#c0392b}.wdh.sat{color:#2f6bd8}.wdh.today{background:var(--a);color:#fff}'
        . '</style></head><body>'
        . '<header>🗓 ' . $calname . '</header><main>'
        . ($tabs !== '' ? '<div class="tabs">' . $tabs . '</div>' : '')
        . ($msg !== '' ? '<div class="msg">' . kc_e($msg) . '</div>' : '')
-       // 追加/編集フォーム
-       . '<div class="card" id="form"><h2>' . ($isedit ? '予定を編集' : '＋ 予定を追加') . '</h2>'
-       . '<form method="post" class="inl" action="' . $self . '">'
+       // 表示切替 + 追加ボタン
+       . '<div class="bar"><div class="vsw">' . $vsw . '</div>'
+       . '<a class="addbtn" href="' . $self . $q . '&amp;view=' . $view . ($day !== '' ? '&amp;d=' . $day : '') . '&amp;add=1#form">＋ 追加</a></div>'
+       // 追加/編集フォーム(折りたたみ。編集時や＋追加時に開く)
+       . '<details class="card" id="form"' . $formopen . '><summary style="font-weight:800;font-size:15px;cursor:pointer">'
+       . ($isedit ? '予定を編集' : '＋ 予定を追加') . '</summary>'
+       . '<form method="post" class="inl" action="' . $self . '" style="margin-top:10px">'
        . '<input type="hidden" name="csrf" value="' . $csrf . '">'
        . '<input type="hidden" name="cal" value="' . kc_e($cal) . '">'
        . '<input type="hidden" name="action" value="save">'
@@ -740,15 +884,12 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $upcoming, $pa
        . '<label class="chk"><input type="checkbox" name="allday" value="1"' . ($f['allday'] ? ' checked' : '') . '>終日</label>'
        . '<label>場所（任意）</label><input type="text" name="location" maxlength="200" value="' . kc_e($f['location']) . '">'
        . '<button class="btn">' . ($isedit ? '更新する' : '追加する') . '</button>'
-       . ($isedit ? '<a class="btn sub" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="' . $self . '?cal=' . rawurlencode($cal) . '">キャンセル</a>' : '')
-       . '</form></div>'
-       // 予定一覧
-       . '<h3 class="sec">これからの予定</h3>' . $up;
-    if ($past !== array()) {
-        echo '<details><summary>過去の予定を見る（' . count($past) . '件）</summary>' . $pasthtml . '</details>';
-    }
-    echo '<p class="empty" style="margin-top:24px">この画面はブラウザで予定を読み書きできます。'
-       . 'PC(Thunderbird)やスマホのカレンダーアプリと同じ予定表につながっています。</p>'
+       . ($isedit ? '<a class="btn sub" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="' . $self . $q . '">キャンセル</a>' : '')
+       . '</form></details>'
+       // 選んだ表示(月/週/日/一覧)
+       . $body
+       . '<p class="empty" style="margin-top:24px">ブラウザで予定を読み書きできます。'
+       . 'Thunderbirdやスマホのカレンダーアプリと同じ予定表につながっています。</p>'
        . '</main></body></html>';
 }
 
