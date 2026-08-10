@@ -1,6 +1,9 @@
 # CGI/FastCGI に Authorization ヘッダを渡す（Basic認証で必須）
 <IfModule mod_rewrite.c>
   RewriteEngine On
+  # PWA資産(manifest/sw)を kcaldav.php のPATH_INFO へ回す。
+  # これで素の設置(kcaldav.php を置いただけ)でも「ホーム画面に追加」が動く。
+  RewriteRule ^(manifest\.webmanifest|sw\.js)$ kcaldav.php/$1 [L]
   RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization},L]
 </IfModule>
 # 保存データを直接読ませない
