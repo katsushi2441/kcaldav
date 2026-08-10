@@ -484,6 +484,52 @@ function kc_jst($ts, $fmt) {
     return $dt->format($fmt);
 }
 
+/* PWA資産(manifest/sw/icon)のベースURL。きれいURL(/cal)ならそれ、
+ * 素の設置なら kcaldav.php のあるディレクトリ。 */
+function kc_asset_base() {
+    if (defined('KCALDAV_PUBLIC_BASE') && KCALDAV_PUBLIC_BASE !== '') {
+        return rtrim(KCALDAV_PUBLIC_BASE, '/');
+    }
+    $d = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME']));
+    return ($d === '/' || $d === '.') ? '' : rtrim($d, '/');
+}
+
+/* PWA: ホーム画面追加/インストール用のマニフェスト(公開・認証不要) */
+function kc_serve_manifest() {
+    $ab = kc_asset_base();
+    $start = $ab . '/';   // WEBカレンダーの入口
+    header('Content-Type: application/manifest+json; charset=utf-8');
+    header('Cache-Control: public, max-age=3600');
+    echo json_encode(array(
+        'name' => 'カレンダー (kcaldav)',
+        'short_name' => 'カレンダー',
+        'description' => 'ブラウザで予定を読み書きできるカレンダー',
+        'start_url' => $start,
+        'scope' => $start,
+        'display' => 'standalone',
+        'orientation' => 'portrait',
+        'background_color' => '#eef2f5',
+        'theme_color' => '#2f6bd8',
+        'lang' => 'ja',
+        'icons' => array(
+            array('src' => $ab . '/icon-192.png', 'sizes' => '192x192', 'type' => 'image/png'),
+            array('src' => $ab . '/icon-512.png', 'sizes' => '512x512', 'type' => 'image/png'),
+            array('src' => $ab . '/icon-maskable.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable'),
+        ),
+    ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+}
+
+/* PWA: 最小Service Worker(インストール要件を満たすためのfetchハンドラ付き)。
+ * オフラインキャッシュはしない(Basic認証と相性が悪いため素通し)。 */
+function kc_serve_sw() {
+    header('Content-Type: application/javascript; charset=utf-8');
+    header('Service-Worker-Allowed: ' . kc_asset_base() . '/');
+    header('Cache-Control: no-cache');
+    echo "self.addEventListener('install',function(e){self.skipWaiting();});\n"
+       . "self.addEventListener('activate',function(e){e.waitUntil(self.clients.claim());});\n"
+       . "self.addEventListener('fetch',function(e){});\n";
+}
+
 function kc_web_start_session() {
     if (session_status() !== PHP_SESSION_ACTIVE) {
         session_name('KCALWEB');
@@ -635,8 +681,18 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $upcoming, $pa
 
     header('Content-Type: text/html; charset=utf-8');
     $calname = kc_e($cals[$cal]['name']);
+    $ab = kc_asset_base();   // PWA資産のベースURL
     echo '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
        . '<meta name="viewport" content="width=device-width,initial-scale=1"><title>' . $calname . '</title>'
+       // ホーム画面に「アプリ」として追加できるようにする(PWA)
+       . '<link rel="manifest" href="' . kc_e($ab) . '/manifest.webmanifest">'
+       . '<meta name="theme-color" content="#2f6bd8">'
+       . '<meta name="mobile-web-app-capable" content="yes">'
+       . '<meta name="apple-mobile-web-app-capable" content="yes">'
+       . '<meta name="apple-mobile-web-app-title" content="' . $calname . '">'
+       . '<link rel="apple-touch-icon" href="' . kc_e($ab) . '/icon-192.png">'
+       . '<link rel="icon" href="' . kc_e($ab) . '/icon-192.png">'
+       . '<script>if("serviceWorker" in navigator){navigator.serviceWorker.register("' . $ab . '/sw.js").catch(function(){});}</script>'
        . '<style>'
        . ':root{--a:#2f6bd8}*{box-sizing:border-box}'
        . 'body{margin:0;background:#eef2f5;color:#22303c;'
@@ -701,6 +757,13 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $upcoming, $pa
 $method = kc_method();
 
 if ($method === 'OPTIONS') { kc_options(); exit; }
+
+// PWA資産(公開・認証不要)。icon-*.pngは実ファイルなのでApacheが直接返す。
+if ($method === 'GET') {
+    $pip = isset($_SERVER['PATH_INFO']) ? trim($_SERVER['PATH_INFO'], '/') : '';
+    if ($pip === 'manifest.webmanifest') { kc_serve_manifest(); exit; }
+    if ($pip === 'sw.js') { kc_serve_sw(); exit; }
+}
 
 // ブラウザ(GET/POST・HTML希望・パス無し)は WEBカレンダー画面へ。
 // CalDAVクライアントはPROPFIND等を使うので、そちらは下のCalDAV処理へ。
