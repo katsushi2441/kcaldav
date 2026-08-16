@@ -429,8 +429,10 @@ function kc_jst_to_ts($date, $time) {
 function kc_ics_build($uid, $summary, $start_ts, $end_ts, $allday, $location, $desc) {
     $stamp = gmdate('Ymd\THis\Z');
     if ($allday) {
-        $ds = 'DTSTART;VALUE=DATE:' . gmdate('Ymd', $start_ts);
-        $de = 'DTEND;VALUE=DATE:' . gmdate('Ymd', $end_ts);
+        // 終日は「日付」だけを書く。epochはUTC基準なのでgmdateだとJSTの0〜9時ぶんが
+        // 前日にずれる(9/27の予定が9/26で保存される)。必ずJSTの暦日で書き出す。
+        $ds = 'DTSTART;VALUE=DATE:' . kc_jst($start_ts, 'Ymd');
+        $de = 'DTEND;VALUE=DATE:' . kc_jst($end_ts, 'Ymd');
     } else {
         $ds = 'DTSTART:' . gmdate('Ymd\THis\Z', $start_ts);
         $de = 'DTEND:' . gmdate('Ymd\THis\Z', $end_ts);
@@ -465,6 +467,7 @@ function kc_parse_dt($params, $val) {
     $val = trim($val);
     if (stripos($params, 'VALUE=DATE') !== false || preg_match('/^\d{8}$/', $val)) {
         $dt = DateTime::createFromFormat('Ymd', substr($val, 0, 8), new DateTimeZone('Asia/Tokyo'));
+        if ($dt) { $dt->setTime(0, 0, 0); }   // 日付のみの指定は時刻が「現在時刻」になるので0時に固定
         return array($dt ? $dt->getTimestamp() : null, true);
     }
     if (substr($val, -1) === 'Z') {
