@@ -676,8 +676,16 @@ function kc_web_app() {
             $d->execute(array((int)$_POST['id'], $user, $cal));
             $msg = '削除しました。';
         }
-        // PRG: 再送防止に自分へリダイレクト
-        header('Location: ' . $self . '?cal=' . rawurlencode($cal) . ($msg !== '' ? '&m=' . rawurlencode($msg) : ''));
+        // PRG: 再送防止に自分へリダイレクト。
+        // 見ていた月・表示モードを引き継ぐ(9月を見て編集したのに8月へ戻る、を防ぐ)
+        $back = '?cal=' . rawurlencode($cal);
+        $pv = isset($_POST['view']) ? (string)$_POST['view'] : '';
+        $pym = isset($_POST['ym']) ? (string)$_POST['ym'] : '';
+        $pd = isset($_POST['d']) ? (string)$_POST['d'] : '';
+        if (in_array($pv, array('month', 'week', 'list', 'day'), true)) { $back .= '&view=' . $pv; }
+        if (preg_match('/^\d{4}-\d{2}$/', $pym)) { $back .= '&ym=' . $pym; }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $pd)) { $back .= '&d=' . $pd; }
+        header('Location: ' . $self . $back . ($msg !== '' ? '&m=' . rawurlencode($msg) : ''));
         exit;
     }
 
@@ -716,6 +724,13 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $events, $view
     $csrf = kc_e($_SESSION['kc_csrf']);
     $wd = array('日','月','火','水','木','金','土');
     $q = '?cal=' . rawurlencode($cal);         // 共通クエリ(カレンダー保持)
+    // 表示状態(月・モード・基準日)を保ったままのリンク用クエリ
+    $qv = $q . '&amp;view=' . rawurlencode($view) . '&amp;ym=' . rawurlencode($ym)
+        . ($day !== '' ? '&amp;d=' . rawurlencode($day) : '');
+    // 保存・削除のPOSTでも「いま見ている月・表示モード」を送る(戻り先を保つ)
+    $keep = '<input type="hidden" name="view" value="' . kc_e($view) . '">'
+          . '<input type="hidden" name="ym" value="' . kc_e($ym) . '">'
+          . ($day !== '' ? '<input type="hidden" name="d" value="' . kc_e($day) . '">' : '');
     $color = isset($cals[$cal]['color']) ? $cals[$cal]['color'] : '#2f6bd8';
 
     // 予定を日付(JST 'Y-m-d')でバケツ分け(月/週/日表示用)
@@ -726,7 +741,7 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $events, $view
     $today = date('Y-m-d');
 
     // 予定1行(リスト/週/日表示用)
-    $ev_row = function ($e, $showdate = true) use ($self, $q, $csrf, $cal, $wd, $color) {
+    $ev_row = function ($e, $showdate = true) use ($self, $q, $qv, $keep, $csrf, $cal, $wd, $color) {
         if ($showdate) {
             $head = kc_jst($e['start'], 'n/j') . '(' . $wd[(int)kc_jst($e['start'], 'w')] . ')';
         } else {
@@ -739,10 +754,11 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $events, $view
             . ($showdate ? '<small>' . kc_e($time) . '</small>' : '') . '</div>'
             . '<div class="evb"><b>' . kc_e($e['summary']) . '</b>' . $loc . '</div>'
             . '<div class="eva">'
-            . '<a class="mini" href="' . $self . $q . '&amp;edit=' . $e['id'] . '#form">編集</a>'
+            . '<a class="mini" href="' . $self . $qv . '&amp;edit=' . $e['id'] . '#form">編集</a>'
             . '<form method="post" onsubmit="return confirm(\'削除しますか？\')">'
             . '<input type="hidden" name="csrf" value="' . $csrf . '"><input type="hidden" name="cal" value="' . kc_e($cal) . '">'
             . '<input type="hidden" name="action" value="del"><input type="hidden" name="id" value="' . $e['id'] . '">'
+            . $keep
             . '<button class="mini del">削除</button></form></div></div>';
     };
 
@@ -845,7 +861,8 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $events, $view
     $vsw = '';
     foreach (array('month' => '月', 'week' => '週', 'list' => '一覧') as $v => $lbl) {
         $on = ($view === $v || ($view === 'day' && $v === 'month')) ? ' on' : '';
-        $vsw .= '<a class="vtab' . $on . '" href="' . $self . $q . '&amp;view=' . $v . '">' . $lbl . '</a>';
+        $vsw .= '<a class="vtab' . $on . '" href="' . $self . $q . '&amp;ym=' . rawurlencode($ym)
+            . ($day !== '' ? '&amp;d=' . rawurlencode($day) : '') . '&amp;view=' . $v . '">' . $lbl . '</a>';
     }
 
     // カレンダー切り替え(複数のとき)
@@ -943,7 +960,7 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $events, $view
        . ($msg !== '' ? '<div class="msg">' . kc_e($msg) . '</div>' : '')
        // 表示切替 + 追加ボタン
        . '<div class="bar"><div class="vsw">' . $vsw . '</div>'
-       . '<a class="addbtn" href="' . $self . $q . '&amp;view=' . $view . ($day !== '' ? '&amp;d=' . $day : '') . '&amp;add=1#form">＋ 追加</a></div>'
+       . '<a class="addbtn" href="' . $self . $qv . '&amp;add=1#form">＋ 追加</a></div>'
        // 追加/編集フォーム(折りたたみ。編集時や＋追加時に開く)
        . '<details class="card" id="form"' . $formopen . '><summary style="font-weight:800;font-size:15px;cursor:pointer">'
        . ($isedit ? '予定を編集' : '＋ 予定を追加') . '</summary>'
@@ -951,6 +968,7 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $events, $view
        . '<input type="hidden" name="csrf" value="' . $csrf . '">'
        . '<input type="hidden" name="cal" value="' . kc_e($cal) . '">'
        . '<input type="hidden" name="action" value="save">'
+       . $keep
        . ($isedit ? '<input type="hidden" name="id" value="' . kc_e($f['id']) . '">' : '')
        . '<label>タイトル</label><input type="text" name="summary" required maxlength="200" value="' . kc_e($f['summary']) . '" placeholder="例: 打ち合わせ">'
        . '<div class="row"><div><label>日付</label><input type="date" name="date" required value="' . kc_e($f['date']) . '"></div>'
@@ -960,7 +978,7 @@ function kc_web_render($user, $cal, $cals, $self, $msg, $editing, $events, $view
        . '<label class="chk"><input type="checkbox" name="allday" value="1"' . ($f['allday'] ? ' checked' : '') . '>終日</label>'
        . '<label>場所（任意）</label><input type="text" name="location" maxlength="200" value="' . kc_e($f['location']) . '">'
        . '<button class="btn">' . ($isedit ? '更新する' : '追加する') . '</button>'
-       . ($isedit ? '<a class="btn sub" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="' . $self . $q . '">キャンセル</a>' : '')
+       . ($isedit ? '<a class="btn sub" style="display:block;text-align:center;text-decoration:none;margin-top:8px" href="' . $self . $qv . '">キャンセル</a>' : '')
        . '</form></details>'
        // 選んだ表示(月/週/日/一覧)
        . $body
