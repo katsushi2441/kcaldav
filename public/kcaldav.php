@@ -29,6 +29,9 @@ require $__cfg;
 if (!defined('KCALDAV_DATA_DIR')) { define('KCALDAV_DATA_DIR', __DIR__ . '/kcaldav_data'); }
 define('KCALDAV_DB', KCALDAV_DATA_DIR . '/kcaldav.sqlite');
 if (!defined('KCALDAV_REALM')) { define('KCALDAV_REALM', 'kcaldav'); }
+// 値を変えると全クライアントにCTag/ETagの変更を通知し、全予定を再取得させる。
+// 予定本文やSQLite内のETagは変更しないため、安全にキャッシュを更新できる。
+if (!defined('KCALDAV_SYNC_REVISION')) { define('KCALDAV_SYNC_REVISION', '2026-08-21-1'); }
 
 date_default_timezone_set(defined('KCALDAV_TZ') ? KCALDAV_TZ : 'Asia/Tokyo');
 
@@ -63,7 +66,12 @@ function kc_ctag($userid, $calendar) {
                             FROM events WHERE userid=? AND calendar=?');
     $st->execute(array($userid, $calendar));
     $r = $st->fetch(PDO::FETCH_ASSOC);
-    return '"' . substr(md5($r['n'] . ':' . $r['m'] . ':' . $r['s']), 0, 16) . '"';
+    return '"' . substr(md5(KCALDAV_SYNC_REVISION . ':' . $r['n'] . ':' . $r['m'] . ':' . $r['s']), 0, 16) . '"';
+}
+
+/** 保存値を変えず、同期世代を反映したクライアント向けETagを返す。 */
+function kc_client_etag($stored_etag) {
+    return '"' . md5(KCALDAV_SYNC_REVISION . ':' . trim((string)$stored_etag, '"')) . '"';
 }
 
 /* ============================ Auth ============================ */
@@ -231,7 +239,7 @@ function kc_prop_home($userid, $want) {
 
 function kc_prop_event($row, $want, $with_data = false) {
     $all = array(
-        'getetag' => '<d:getetag>' . kc_e($row['etag']) . '</d:getetag>',
+        'getetag' => '<d:getetag>' . kc_e(kc_client_etag($row['etag'])) . '</d:getetag>',
         'getcontenttype' => '<d:getcontenttype>text/calendar; charset=utf-8; component=vevent</d:getcontenttype>',
         'resourcetype' => '<d:resourcetype/>',
         'current-user-privilege-set' =>
@@ -359,7 +367,7 @@ function kc_get($userid, $seg, $head = false) {
     $row = $st->fetch(PDO::FETCH_ASSOC);
     if (!$row) { http_response_code(404); return; }
     header('Content-Type: text/calendar; charset=utf-8');
-    header('ETag: ' . $row['etag']);
+    header('ETag: ' . kc_client_etag($row['etag']));
     if ($head) { http_response_code(200); return; }
     echo $row['ical'];
 }
@@ -396,7 +404,7 @@ function kc_put($userid, $seg) {
         $i = $db->prepare('INSERT INTO events (userid,calendar,uri,uid,etag,ical,updated_at) VALUES (?,?,?,?,?,?,?)');
         $i->execute(array($userid, $ckey, $uri, $uid, $etag, $ical, time()));
     }
-    header('ETag: ' . $etag);
+    header('ETag: ' . kc_client_etag($etag));
     http_response_code($exists ? 204 : 201);
 }
 
