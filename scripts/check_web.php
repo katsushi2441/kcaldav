@@ -9,6 +9,18 @@ file_put_contents($cfg, "<?php\ndefine('KCALDAV_DATA_DIR','$tmp');\ndefine('KCAL
     . "function kcaldav_users(){return array('kojima'=>array('password_hash'=>'$hash','calendars'=>array('default'=>array('name'=>'マイカレンダー','color'=>'#2f6bd8'))));}\n");
 $env = array('KCALDAV_CONFIG' => $cfg, 'PATH' => getenv('PATH'));
 $desc = array(1 => array('file', $tmp . '/log', 'a'), 2 => array('file', $tmp . '/log', 'a'));
+// 前回の検証で残ったサーバーが同じポートを掴んでいると、古い設定のまま応答して
+// 検証結果が丸ごと嘘になる（実際に誤判定した）。掴まれていたら先に止める。
+function kc_free_port($host, $port) {
+    $fp = @fsockopen($host, $port, $e, $s, 0.4);
+    if (!$fp) { return; }
+    fclose($fp);
+    fwrite(STDERR, "ポート {$port} が使用中です。前回の検証サーバーを終了してから再実行してください:\n"
+        . "  pkill -f 'php -S {$host}:{$port}'\n");
+    exit(2);
+}
+kc_free_port('127.0.0.1', 18996);
+
 $proc = proc_open('php -S 127.0.0.1:18996 ' . escapeshellarg($pub . '/kcaldav.php'), $desc, $p, $pub, $env);
 usleep(700000);
 $B = 'http://127.0.0.1:18996/kcaldav.php';

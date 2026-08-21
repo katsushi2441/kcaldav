@@ -35,6 +35,27 @@ if (!defined('KCALDAV_SYNC_REVISION')) { define('KCALDAV_SYNC_REVISION', '2026-0
 
 date_default_timezone_set(defined('KCALDAV_TZ') ? KCALDAV_TZ : 'Asia/Tokyo');
 
+// CalDAV同期障害の診断用。認証情報や予定本文は記録せず、メソッド・応答・
+// パス・User-AgentだけをWeb非公開のデータディレクトリへ残す。
+// CalDAVクライアントは短い間隔で叩くので、既定は無効。障害を追うときだけ
+// 設定で KCALDAV_SYNC_LOG を true にする（1MBを超えたら1世代だけ退避する）。
+if (!defined('KCALDAV_SYNC_LOG')) { define('KCALDAV_SYNC_LOG', false); }
+if (!defined('KCALDAV_SYNC_LOG_MAX')) { define('KCALDAV_SYNC_LOG_MAX', 1048576); }
+$__method = isset($_SERVER['REQUEST_METHOD']) ? strtoupper($_SERVER['REQUEST_METHOD']) : '';
+if (KCALDAV_SYNC_LOG && in_array($__method, array('OPTIONS', 'PROPFIND', 'REPORT', 'PUT', 'DELETE'), true)) {
+    $__uri = isset($_SERVER['REQUEST_URI']) ? parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) : '';
+    $__ua = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
+    $__ua = substr(str_replace(array("\r", "\n", "\t"), ' ', $__ua), 0, 180);
+    register_shutdown_function(function () use ($__method, $__uri, $__ua) {
+        if (!is_dir(KCALDAV_DATA_DIR)) { @mkdir(KCALDAV_DATA_DIR, 0775, true); }
+        $path = KCALDAV_DATA_DIR . '/sync_access.log';
+        if (is_file($path) && filesize($path) >= KCALDAV_SYNC_LOG_MAX) { @rename($path, $path . '.1'); }
+        $line = date('c') . "\t" . $__method . "\t" . http_response_code()
+              . "\t" . $__uri . "\t" . $__ua . "\n";
+        @file_put_contents($path, $line, FILE_APPEND | LOCK_EX);
+    });
+}
+
 // XML名前空間
 $GLOBALS['KC_NS'] = array(
     'DAV:' => 'd',

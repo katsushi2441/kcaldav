@@ -15,6 +15,23 @@ define('KCALDAV_TZ', 'Asia/Tokyo');
 define('KCALDAV_REALM', 'kcaldav');
 
 /**
+ * 同期の診断ログ（既定は無効）。
+ * 「クライアントで同期できない」を追うときだけ true にしてください。
+ * kcaldav_data/sync_access.log に「日時・メソッド・応答コード・パス・User-Agent」
+ * だけを記録します（パスワードや予定の中身は記録しません）。
+ * CalDAVクライアントは短い間隔で叩くので、原因が分かったら false に戻してください。
+ * 1MBを超えたら sync_access.log.1 へ1世代だけ退避します。
+ */
+// define('KCALDAV_SYNC_LOG', true);
+
+/**
+ * 同期世代。この値を変えると、全クライアントへ「予定が変わった」と伝わり、
+ * 手元のキャッシュを捨てて取り直させます。保存データは変わりません。
+ * クライアント側に古い予定が残って消えないときだけ、日付などを変えてください。
+ */
+// define('KCALDAV_SYNC_REVISION', '2026-08-21-1');
+
+/**
  * ユーザーとカレンダー。
  *   キー           … ログインのユーザー名（URLにも入る。英数字推奨）
  *   password_hash  … password_hash() で作った文字列

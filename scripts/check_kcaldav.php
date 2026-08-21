@@ -17,7 +17,19 @@ file_put_contents($cfg, "<?php\n"
     . "function kcaldav_users(){ return array('u'=>array('password_hash'=>'" . $hash . "',"
     . "'calendars'=>array('cal'=>array('name'=>'テスト','color'=>'#000')))); }\n");
 
+// 前回の検証で残ったサーバーが同じポートを掴んでいると、古い設定のまま応答して
+// 検証結果が丸ごと嘘になる（実際に誤判定した）。掴まれていたら先に止める。
+function kc_free_port($host, $port) {
+    $fp = @fsockopen($host, $port, $e, $s, 0.4);
+    if (!$fp) { return; }
+    fclose($fp);
+    fwrite(STDERR, "ポート {$port} が使用中です。前回の検証サーバーを終了してから再実行してください:\n"
+        . "  pkill -f 'php -S {$host}:{$port}'\n");
+    exit(2);
+}
+
 $host = '127.0.0.1'; $port = 18997;
+kc_free_port($host, $port);
 $env = array('KCALDAV_CONFIG' => $cfg, 'PATH' => getenv('PATH'));
 $desc = array(0 => array('pipe','r'), 1 => array('file', $tmp . '/srv.log','a'), 2 => array('file', $tmp . '/srv.log','a'));
 $proc = proc_open('php -S ' . $host . ':' . $port . ' ' . escapeshellarg($pubdir . '/kcaldav.php'),
@@ -95,6 +107,20 @@ list($c) = req('PROPFIND', "$base/other/cal/", 'u:testpass', $pf);
 ok($c === 403, '他人のパスは403', $c);
 list($c) = req('PUT', "$base/u/nope/x.ics", 'u:testpass', $ics);
 ok($c === 403, '宣言外カレンダーへのPUTは403', $c);
+
+echo "\n[7] 同期の診断ログは既定で無効(売り物が勝手にログを育てない)\n";
+ok(!is_file($tmp . '/sync_access.log'), '既定ではsync_access.logを作らない');
+$src = file_get_contents(dirname(__DIR__) . '/public/kcaldav.php');
+ok(preg_match("/define\('KCALDAV_SYNC_LOG', false\)/", $src) === 1, 'KCALDAV_SYNC_LOGの既定はfalse');
+ok(strpos($src, 'KCALDAV_SYNC_LOG_MAX') !== false, 'ログに上限がある(無限に育たない)');
+ok(strpos($src, 'HTTP_AUTHORIZATION') === false || strpos($src, "'sync_access.log'") === false
+   || !preg_match('/sync_access\.log.*PHP_AUTH_PW/s', $src), '診断ログに資格情報を書かない');
+
+echo "\n[8] 同期世代(CTag/ETag)\n";
+ok(strpos($src, 'KCALDAV_SYNC_REVISION') !== false, '同期世代の定数がある');
+ok(preg_match('/function kc_client_etag/', $src) === 1, 'クライアント向けETagを1か所で作る');
+ok(preg_match('/getetag>\' \. kc_e\(kc_client_etag/', $src) === 1, 'PROPFIND/REPORTのetagが同期世代を通る');
+ok(substr_count($src, "header('ETag: ' . kc_client_etag(") === 2, 'GET/PUTのETagヘッダも同期世代を通る');
 
 if (is_resource($proc)) { proc_terminate($proc); proc_close($proc); }
 array_map('unlink', glob($tmp . '/*'));
