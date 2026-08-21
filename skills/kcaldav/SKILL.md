@@ -61,8 +61,15 @@ ETag はクライアントへ出すときだけ `kc_client_etag()` を通す（�
 
 ### 登録済みのURLが変わってしまった（旧パスのまま同期させたい）
 外部リダイレクト(301/302)にすると PROPFIND/REPORT/PUT の**メソッドと本文と
-Authorizationヘッダーが落ちる**。`.htaccess` の `RewriteRule ... [PT,L,QSA]` で
-**内部的に**接続する（`deploy/legacy-kcaldav.htaccess` が実物）。
+Authorizationヘッダーが落ちる**。旧パス側に `.htaccess` を置き、`[PT]` で
+**内部的に**接続する。
+
+```apache
+RewriteEngine On
+# 旧 /old/kcaldav.php/<user>/<calendar>/ を 現行 /new/<user>/<calendar>/ へ
+RewriteRule ^kcaldav\.php/(.*)$ /new/$1 [PT,L,QSA]
+RewriteRule ^(.*)$ /new/$1 [PT,L,QSA]
+```
 
 ### 何が起きているか分からない
 設定で `KCALDAV_SYNC_LOG` を true にすると、`kcaldav_data/sync_access.log` に
