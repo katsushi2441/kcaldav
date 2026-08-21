@@ -449,13 +449,20 @@ function kc_ics_build($uid, $summary, $start_ts, $end_ts, $allday, $location, $d
 /** iCalの1本から表示用に要点を取り出す。時刻はepoch(UTC基準)で返す */
 function kc_ics_parse($ical) {
     $ical = preg_replace("/\r\n[ \t]/", '', $ical);   // 折り返し行の展開
+    // Thunderbird等が付加するVTIMEZONEにもDTSTARTがある。
+    // カレンダー全体を検索するとその遷移日時を予定日時と誤認するため、
+    // 表示用の値はVEVENTコンポーネントだけから取り出す。
+    $event = $ical;
+    if (preg_match('/BEGIN:VEVENT(?:\r?\n)(.*?)END:VEVENT/si', $ical, $component)) {
+        $event = $component[0];
+    }
     $out = array('summary' => '(無題)', 'start' => null, 'end' => null,
                  'allday' => false, 'location' => '', 'uid' => '');
-    if (preg_match('/^UID:(.*)$/mi', $ical, $m)) { $out['uid'] = trim($m[1]); }
-    if (preg_match('/^SUMMARY(?:;[^:\r\n]*)?:(.*)$/mi', $ical, $m)) { $out['summary'] = kc_ics_unesc(trim($m[1])); }
-    if (preg_match('/^LOCATION(?:;[^:\r\n]*)?:(.*)$/mi', $ical, $m)) { $out['location'] = kc_ics_unesc(trim($m[1])); }
+    if (preg_match('/^UID:(.*)$/mi', $event, $m)) { $out['uid'] = trim($m[1]); }
+    if (preg_match('/^SUMMARY(?:;[^:\r\n]*)?:(.*)$/mi', $event, $m)) { $out['summary'] = kc_ics_unesc(trim($m[1])); }
+    if (preg_match('/^LOCATION(?:;[^:\r\n]*)?:(.*)$/mi', $event, $m)) { $out['location'] = kc_ics_unesc(trim($m[1])); }
     foreach (array('start' => 'DTSTART', 'end' => 'DTEND') as $k => $name) {
-        if (preg_match('/^' . $name . '([;][^:\r\n]*)?:([0-9TZ]+)/mi', $ical, $m)) {
+        if (preg_match('/^' . $name . '([;][^:\r\n]*)?:([0-9TZ]+)/mi', $event, $m)) {
             list($ts, $ad) = kc_parse_dt($m[1], $m[2]);
             $out[$k] = $ts;
             if ($ad) { $out['allday'] = true; }

@@ -66,6 +66,24 @@ $rep = curl_exec($ch); curl_close($ch);
 ok(strpos($rep, 'テスト会議') !== false, 'CalDAVのcalendar-dataにWEBで足した予定が入る');
 ok(preg_match('/DTSTART:20260815T050000Z/', $rep) === 1, '14:00 JST が 05:00Z で保存されている(UTC変換OK)');
 
+echo "\n[4b] Thunderbird形式(VTIMEZONE付き)の予定をWEB表示\n";
+$tbIcs = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Mozilla.org/NONSGML Mozilla Calendar V1.1//EN\r\n"
+    . "BEGIN:VTIMEZONE\r\nTZID:Asia/Tokyo\r\nBEGIN:STANDARD\r\nDTSTART:18880101T001859\r\nTZOFFSETFROM:+091859\r\nTZOFFSETTO:+0900\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n"
+    . "BEGIN:VEVENT\r\nUID:thunderbird-vtimezone-test\r\nDTSTART;TZID=Asia/Tokyo:20260914T090000\r\nDTEND;TZID=Asia/Tokyo:20260914T100000\r\nSUMMARY:Thunderbird予定\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+$ch = curl_init("$B/kojima/default/thunderbird-vtimezone-test.ics");
+curl_setopt_array($ch, array(CURLOPT_CUSTOMREQUEST=>'PUT', CURLOPT_RETURNTRANSFER=>true,
+    CURLOPT_USERPWD=>'kojima:1111', CURLOPT_POSTFIELDS=>$tbIcs,
+    CURLOPT_HTTPHEADER=>array('Content-Type: text/calendar; charset=utf-8')));
+curl_exec($ch); $tbPut = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+ok($tbPut === 201, 'Thunderbird形式の予定をPUTできる');
+list($c, $h, $tbDay) = http('GET', "$B/?cal=default&view=day&d=2026-09-14");
+ok($c === 200 && strpos($tbDay, 'Thunderbird予定') !== false,
+    'VTIMEZONEの日時ではなくVEVENTの9月予定を表示する');
+$ch = curl_init("$B/kojima/default/thunderbird-vtimezone-test.ics");
+curl_setopt_array($ch, array(CURLOPT_CUSTOMREQUEST=>'DELETE', CURLOPT_RETURNTRANSFER=>true,
+    CURLOPT_USERPWD=>'kojima:1111'));
+curl_exec($ch); curl_close($ch);
+
 echo "\n[5] 編集\n";
 preg_match('/edit=(\d+)/', $b, $me); $id = isset($me[1]) ? $me[1] : '';
 list($c, $h, $b2) = http('GET', "$B/?cal=default&edit=$id");

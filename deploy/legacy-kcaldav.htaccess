@@ -1,0 +1,8 @@
+RewriteEngine On
+
+# 旧Thunderbird登録先 /kcaldav/kcaldav.php/<user>/<calendar>/ を
+# 現行 /cal/<user>/<calendar>/ へ内部的に接続する。
+# 外部リダイレクトにしないことで、PROPFIND/REPORT/PUT/DELETE と
+# Authorizationヘッダー・リクエスト本文をそのまま維持する。
+RewriteRule ^kcaldav\.php/(.*)$ /cal/$1 [PT,L,QSA]
+RewriteRule ^(.*)$ /cal/$1 [PT,L,QSA]
