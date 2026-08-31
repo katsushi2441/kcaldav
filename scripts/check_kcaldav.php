@@ -126,5 +126,22 @@ if (is_resource($proc)) { proc_terminate($proc); proc_close($proc); }
 array_map('unlink', glob($tmp . '/*'));
 @rmdir($tmp);
 
+
+echo "\n[9] REPORT の同期(2026-08-31にThunderbirdが同期できなかった件)\n";
+
+$src = file_get_contents(__DIR__ . '/../public/kcaldav.php');
+
+// sync-collection は sync-token を返さないと、クライアントが「どこまで
+// 同期したか」を保存できず毎回ゼロからやり直す(RFC 6578)。
+ok(strpos($src, "sync-collection') !== false") !== false, 'sync-collectionを個別に処理する');
+ok(preg_match('#sync-collection.*?<d:sync-token>#s', $src) === 1, 'sync-collectionでsync-tokenを返す');
+
+// time-range を無視すると、1888年から始まる繰り返し予定まで毎回全部送る。
+ok(strpos($src, 'function kc_time_range') !== false, 'time-rangeを解釈する');
+ok(strpos($src, 'kc_in_range(') !== false, 'calendar-queryでtime-rangeで絞る');
+
+// 繰り返しは展開できないので落とさない。落とすと祝日がクライアントから消える。
+ok(preg_match('#RRULE.*?return true#s', $src) === 1, '繰り返し(RRULE)は範囲で落とさない');
+
 echo "\n" . ($fail === 0 ? "すべて通りました（{$pass}件）\n" : "失敗 {$fail}件 / 成功 {$pass}件\n");
 exit($fail === 0 ? 0 : 1);

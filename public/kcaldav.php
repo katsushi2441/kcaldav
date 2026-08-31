@@ -369,15 +369,84 @@ function kc_report($userid, $seg) {
         return;
     }
 
-    // calendar-query(+その他): とりあえず全予定を calendar-data つきで返す
-    // (個人カレンダー規模ではフィルタ省略で問題ない。クライアント側で絞る)
+    // sync-collection (RFC 6578): 差分同期。
+    // ★<d:sync-token> を返さないとクライアントは「どこまで同期したか」を
+    //   保存できず、毎回ゼロからやり直す。PROPFINDでsync-tokenを名乗って
+    //   いるのにここで返さないのは矛盾で、Thunderbirdの同期が進まなくなる
+    //   (2026-08-31に実測)。削除の履歴は持っていないので、常に全件を返す
+    //   「初回同期」として応答する。RFCが許している振る舞い。
+    if (stripos($body, 'sync-collection') !== false) {
+        echo kc_xml_header();
+        $st = kc_db()->prepare('SELECT uri, etag, ical FROM events WHERE userid=? AND calendar=? ORDER BY id');
+        $st->execute(array($userid, $ckey));
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            echo kc_response($base . rawurlencode($row['uri']), kc_prop_event($row, $want, true));
+        }
+        echo '<d:sync-token>' . kc_ctag($userid, $ckey) . '</d:sync-token>';
+        echo '</d:multistatus>';
+        return;
+    }
+
+    // calendar-query: time-range で絞る。
+    // 絞らずに全件返すと、1888年や1948年から始まる繰り返し予定(祝日など)まで
+    // 毎回そのまま送ることになり、クライアントの表示が荒れる(実測で121件)。
+    // 繰り返し(RRULE)は展開できないので落とさない。落とすと祝日が消える。
+    list($rangeStart, $rangeEnd) = kc_time_range($body);
     echo kc_xml_header();
     $st = kc_db()->prepare('SELECT uri, etag, ical FROM events WHERE userid=? AND calendar=? ORDER BY id');
     $st->execute(array($userid, $ckey));
     while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (!kc_in_range($row['ical'], $rangeStart, $rangeEnd)) { continue; }
         echo kc_response($base . rawurlencode($row['uri']), kc_prop_event($row, $want, true));
     }
     echo '</d:multistatus>';
+}
+
+/**
+ * REPORT本文から <c:time-range start= end=> を取り出す。
+ * 指定が無ければ null を返し、その場合は絞らない。
+ */
+function kc_time_range($body) {
+    if (!preg_match('#<[^>]*:?time-range\b([^>]*)>#i', $body, $m)) {
+        return array(null, null);
+    }
+    $attrs = $m[1];
+    $start = preg_match('#start\s*=\s*"([^"]+)"#i', $attrs, $a) ? $a[1] : null;
+    $end   = preg_match('#end\s*=\s*"([^"]+)"#i', $attrs, $b) ? $b[1] : null;
+    return array(kc_ical_ts($start), kc_ical_ts($end));
+}
+
+/** 20260901T000000Z / 20260901 を Unix時刻にする。 */
+function kc_ical_ts($v) {
+    if ($v === null || $v === '') { return null; }
+    $v = trim($v);
+    if (preg_match('#^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2}))?#', $v, $m)) {
+        return gmmktime(
+            isset($m[4]) ? (int)$m[4] : 0, isset($m[5]) ? (int)$m[5] : 0,
+            isset($m[6]) ? (int)$m[6] : 0, (int)$m[2], (int)$m[3], (int)$m[1]
+        );
+    }
+    return null;
+}
+
+/**
+ * この予定が要求された期間に重なるか。
+ *
+ * 繰り返し(RRULE)は展開しないので常に通す。落とすと、1回目が過去にある
+ * 祝日・記念日がクライアントから消える。
+ */
+function kc_in_range($ical, $start, $end) {
+    if ($start === null && $end === null) { return true; }
+    if (stripos($ical, 'RRULE') !== false || stripos($ical, 'RDATE') !== false) { return true; }
+
+    $s = preg_match('#DTSTART[^:\r\n]*:([0-9TZ]+)#i', $ical, $m) ? kc_ical_ts($m[1]) : null;
+    $e = preg_match('#DTEND[^:\r\n]*:([0-9TZ]+)#i', $ical, $m2) ? kc_ical_ts($m2[1]) : null;
+    if ($s === null) { return true; }          // 読めないものは落とさない
+    if ($e === null) { $e = $s + 86400; }
+
+    if ($end !== null && $s >= $end) { return false; }
+    if ($start !== null && $e <= $start) { return false; }
+    return true;
 }
 
 function kc_get($userid, $seg, $head = false) {
